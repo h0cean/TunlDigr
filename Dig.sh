@@ -1,10 +1,60 @@
 #!/bin/bash
 
-scriptVersion="0.6.3"
+scriptVersion="0.7.7"
 
-# Generates a random variable and echos it back.
+# The URL of the script project is:
+# https://github.com/MohsenHNSJ/TunlDigr
+
+# The URL of the script is:
+# https://raw.githubusercontent.com/MohsenHNSJ/TunlDigr/main/Dig.sh
+
+# If the script executes incorrectly, go to:
+# https://github.com/MohsenHNSJ/TunlDigr/issues
+
+# Color Table
+RED=$(tput setaf 160) # Error
+GREEN=$(tput setaf 34) # Success
+YELLOW=$(tput setaf 226) # Warning
+BLUE=$(tput setaf 39) # Information
+RESET=$(tput sgr0) # Reset
+
+# Global Variables
+# The file path for the access log.
+# The value is a valid file path, such as "/var/log/Xray/access.log".
+# When this item is not specified or is an empty value, the log is output to stdout.
+# The special value (none) disables access logs.
+XRAY_ACCESS_LOG_PATH=""
+
+# If set to 1, script should set XRAY_ACCESS_LOG_PATH as (none).
+DISABLE_XRAY_ACCESS_LOG=0
+
+# The file path for the error log.
+# The value is a valid file path, such as "/var/log/Xray/error.log".
+# When this item is not specified or is an empty value, the log is output to stdout.
+# The special value none disables error logs.
+XRAY_ERROR_LOG_PATH=""
+
+# If set to 1, script should set XRAY_ERROR_LOG_PATH as (none).
+DISABLE_XRAY_ERROR_LOG=0
+
+# The log level for error logs, indicating the information that needs to be recorded.
+# The default value is "warning".
+# (0) "none": Do not record any content.
+# (1) "debug": Output information used for debugging the program. Includes all "info" content.
+# (2) "info": Runtime status information, etc., which does not affect normal use. Includes all "warning" content.
+# (3) "warning": Information output when there are some problems that do not affect normal operation but may affect user experience. Includes all "error" content.
+# (4) "error": Xray encountered a problem that cannot be run normally and needs to be resolved immediately.
+XRAY_LOG_LEVEL=3
+
+# Whether to enable DNS query logs, 
+# for example: DOH//doh.server got answer: domain.com -> [ip1, ip2] 2.333ms.
+# false
+# true
+XRAY_LOG_DNS=false
+
+# Generates a random variable and echoes it back.
 # <<<Options
-#   username: generate and return a random short ( 6 - 10 ) username
+#   user-name: generate and return a random short ( 6 - 10 ) user-name
 #   password: generate and return a random long ( 18 - 22 ) password
 generateRandom() {
     # We read the argument supplied to the function to determine which type of random variable to generate and echo back.
@@ -19,7 +69,7 @@ generateRandom() {
 	            } | sort -R | awk '{printf "%s",$1}')"
 			;;
         password)
-        	# We avoid adding symbols inside the password as it sometimes caused problems, therefore the password lenght is high.
+        	# We avoid adding symbols inside the password as it sometimes caused problems, therefore the password length is high.
         	choose() { echo ${1:RANDOM%${#1}:1} $RANDOM; }
 		        local randomVariable="$({ choose '123456789'
 		        choose 'abcdefghijklmnopqrstuvwxyz'
@@ -35,7 +85,7 @@ generateRandom() {
     }
 
 # Asks the user to select a tunneling method by entering a numeric value from 1 to 3.
-# Can be skipped by -tm and specifing a method in the argument.
+# Can be skipped by -tm and specifying a method in the argument.
 # Checks input for validity and if it's a valid, it will convert it to a string and save it in (tunnelingMethod) variable.
 # Current available tunnels: (1) Hysteria 2, (2) Reality, (3) ShadowSocks
 askTunnelingMethod() {
@@ -43,16 +93,16 @@ askTunnelingMethod() {
 	echo "|             Select the desired tunneling method to set up             |"
 	echo "|                   Enter only numbers between 1 - 3                    |"
 	echo "========================================================================="
-	echo "1 - Hysteria 2"
+	echo "1 - Hysteria 2 (Sing-Box)"
 	echo "2 - Reality (XTLS VLESS)"
-	echo "3 - Shadowsocks (Obsolete)"
+	echo "3 - Shadowsocks-libev (Obsolete)"
     # We ask the user to select the desired tunneling method.
 	# We limit the input character count to 1 by using (-n) argument.
 	read -n 1 -p "Select tunneling method: " tunnelingMethod
 	# We validate user input and show an error if it's invalid, then loop the process until the value is valid.
 	until [[ $tunnelingMethod == +([1-3]) ]]; do
 		echo
-		read -n 1 -p "Invalid input, please only input a number from 1 - 3: " tunnelingMethod
+		read -n 1 -p "${YELLOW}Invalid input: ${RESET}Please only input a number from 1 - 3: " tunnelingMethod
 	    done
     # We convert the input value from user, to a string for better code readability.
     case $tunnelingMethod in
@@ -102,10 +152,10 @@ showStartupMessage() {
 	echo "========================================================================="
 	echo "|                    TunlDigr by @MohsenHNSJ (Github)                   |"
 	echo "========================================================================="
-	echo "Check out the github page, contribute and suggest ideas/bugs/improvments."
+	echo "Check out the github page, contribute and suggest ideas/bugs/improvements."
 	echo
 	echo "=========================="
-	echo "| Script version $scriptVersion   |"
+	echo "| ${BLUE}Script version $scriptVersion   ${RESET}|"
 	echo "=========================="
     }
 
@@ -171,10 +221,10 @@ saveAndTransferCredentials() {
 	echo $newAccUsername > /tunlDigrTemp/tempNewAccUsername.txt
 	echo $newAccPassword > /tunlDigrTemp/tempNewAccPassword.txt
     # If selected tunneling method is not shadowsocks, We save the latest version of tunneling method.
-    if[ ! $tunnelingMethod=shadowsocks ]; then
+    if [ ! $tunnelingMethod == shadowsocks ]; then
 	    echo $latestPackageVersion > /tunlDigrTemp/tempLatestPackageVersion.txt
         fi
-	# We transfer ownership of the temp folder to the new user, so the new user is able to Access and delete the senstive information when it's no longer needed.
+	# We transfer ownership of the temp folder to the new user, so the new user is able to Access and delete the sensitive information when it's no longer needed.
 	sudo chown -R $newAccUsername /tunlDigrTemp/
     }
 
@@ -186,10 +236,12 @@ readAndRemoveCredentials() {
 	# We read the saved credentials.
 	tempNewAccUsername=$(</tunlDigrTemp/tempNewAccUsername.txt)
 	tempNewAccPassword=$(</tunlDigrTemp/tempNewAccPassword.txt)
-    # We read the latest version of tunneling method.
-    tempLatestPackageVersion=$(</tunlDigrTemp/tempLatestPackageVersion.txt)
-    sudo rm /tunlDigrTemp/tempLatestPackageVersion.txt
-	# We delete senstive inforamtion.
+    # If selected tunneling method is not shadowsocks, We read the latest version of tunneling method.
+    if [ ! $tunnelingMethod == shadowsocks ]; then
+        tempLatestPackageVersion=$(</tunlDigrTemp/tempLatestPackageVersion.txt)
+        sudo rm /tunlDigrTemp/tempLatestPackageVersion.txt
+        fi
+	# We delete sensitive information.
 	sudo rm /tunlDigrTemp/tempNewAccUsername.txt
 	sudo rm /tunlDigrTemp/tempNewAccPassword.txt
     }
@@ -201,8 +253,8 @@ allowPortOnUfw() {
 	echo "|                             Allowing Port                             |"
 	echo "========================================================================="
 	# We provide password to 'sudo' command and open protocol port.
-    # We check wether user has provided custom port and if so, we check if it's in the acceptable range (0 - 65535).
-    # If not, we will use the dafault 443.
+    # We check whether user has provided custom port and if so, we check if it's in the acceptable range (0 - 65535).
+    # If not, we will use the default 443.
     if [ ! -v tunnelPort ] || [[ $tunnelPort != +([0-9]) ]] || [ $tunnelPort -gt 65535 ]; then       
         tunnelPort=443
         fi
@@ -216,12 +268,12 @@ addNewUser() {
 	echo "========================================================================="
 	echo "|                  Adding a new user and configuring                    |"
 	echo "========================================================================="
-	# We check wether user has provided custom username.
+	# We check whether user has provided custom username.
 	# If not, we will generate a random username.
 	if [ ! -v newAccUsername ]; then
         newAccUsername=$(generateRandom username)
 	    fi
-	# We check wether user has provided custom password.
+	# We check whether user has provided custom password.
 	# If not, we will generate a random password.
 	if [ ! -v newAccPassword ]; then
 		newAccPassword=$(generateRandom password)
@@ -242,6 +294,7 @@ createService() {
     local hysteria2ServicePath="/etc/systemd/system/hysteria2.service"
     local hysteria2serviceDescription="sing-box service"
     local hysteria2ServiceDocumentation="https://sing-box.sagernet.org"
+    local hysteria2ServiceAfter="network.target nss-lookup.target"
     local hysteriaCapabilityBoundingSet="CAP_NET_ADMIN CAP_NET_BIND_SERVICE CAP_SYS_PTRACE CAP_DAC_READ_SEARCH"
     local hysteriaAmbientCapabilities="CAP_NET_ADMIN CAP_NET_BIND_SERVICE CAP_SYS_PTRACE CAP_DAC_READ_SEARCH"
     local hysteriaExecStart="/home/$newAccUsername/hysteria2/sing-box -D /home/$newAccUsername/hysteria2/ run -c /home/$newAccUsername/hysteria2/config.json"
@@ -249,6 +302,7 @@ createService() {
     # Reality
     local realityServicePath="/etc/systemd/system/xray.service"
     local realityServiceDescription="XTLS Xray-Core a VMESS/VLESS Server"
+    local realityServiceAfter="network.target nss-lookup.target"
     local realityCapabilityBoundingSet="CAP_NET_ADMIN CAP_NET_BIND_SERVICE"
     local realityAmbientCapabilities="CAP_NET_ADMIN CAP_NET_BIND_SERVICE"
     local realityExecStart="/home/$newAccUsername/xray/xray run -config /home/$newAccUsername/xray/config.json"
@@ -257,6 +311,8 @@ createService() {
     local shadowsocksServicePath="/etc/systemd/system/shadowsocks-libev-server@.service"
     local shadowsocksServiceDescription="Shadowsocks-Libev Custom Server Service"
     local shadowsocksServiceDocumentation="man:ss-server(1)"
+    local shadowsocksServiceAfter="network-online.target"
+    local shadowsocksExecStart="/usr/bin/snap run shadowsocks-libev.ss-server -c /var/snap/shadowsocks-libev/common/etc/shadowsocks-libev/config.json"
     # We determine the selected tunneling method and set service variables accordingly.
     case $tunnelingMethod in
         hysteria2)
@@ -264,6 +320,7 @@ createService() {
             local serviceName="Hysteria 2"
             local serviceDescription=$hysteria2serviceDescription
             local serviceDocumentation=$hysteria2ServiceDocumentation
+            local serviceAfter=$hysteria2ServiceAfter
             local serviceCapabilityBoundingSet=$hysteriaCapabilityBoundingSet
             local serviceAmbientCapabilities=$hysteriaAmbientCapabilities
             local serviceExecStart=$hysteriaExecStart
@@ -273,6 +330,7 @@ createService() {
             local servicePath=$realityServicePath
             local serviceName="Reality"
             local serviceDescription=$realityServiceDescription
+            local serviceAfter=$realityServiceAfter
             local serviceCapabilityBoundingSet=$realityCapabilityBoundingSet
             local serviceAmbientCapabilities=$realityAmbientCapabilities
             local serviceExecStart=$realityExecStart
@@ -282,6 +340,8 @@ createService() {
             local servicePath=$shadowsocksServicePath
             local serviceDescription=$shadowsocksServiceDescription
             local serviceDocumentation=$shadowsocksServiceDocumentation
+            local serviceAfter=$shadowsocksServiceAfter
+            local serviceExecStart=$shadowsocksExecStart
             ;;
         esac
 	echo "========================================================================="
@@ -292,16 +352,29 @@ createService() {
 	sudo echo "Description=$serviceDescription" >> $servicePath
     # Hysteria 2 & ShadowSocks have Documentation.
         case $tunnelingMethod in
-        hysteria2 || shadowsocks)
+        'hysteria2' | 'shadowsocks')
             sudo echo "Documentation=$serviceDocumentation" >> $servicePath
             ;;
         esac
-	sudo echo "After=network.target nss-lookup.target" >> $servicePath
+	sudo echo "After=$serviceAfter" >> $servicePath
+    # ShadowSocks Wants
+    if [ $tunnelingMethod == shadowsocks ]; then
+        sudo echo "Wants=network-online.target" >> $servicePath
+        fi
 	sudo echo "[Service]" >> $servicePath
-	sudo echo "User=$newAccUsername" >> $servicePath
-	sudo echo "Group=$newAccUsername" >> $servicePath
-	sudo echo "CapabilityBoundingSet=$serviceCapabilityBoundingSet" >> $servicePath
-	sudo echo "AmbientCapabilities=$serviceAmbientCapabilities" >> $servicePath
+    # ShadowSocks Type
+    if [ $tunnelingMethod == shadowsocks ]; then
+        sudo echo "Type=simple" >> $servicePath
+        fi
+    # Hysteria 2 & Reality User, Group, CapabilityBoundingSet, AmbientCapabilities
+    case $tunnelingMethod in
+        'hysteria2' | 'reality')
+            	sudo echo "User=$newAccUsername" >> $servicePath
+	            sudo echo "Group=$newAccUsername" >> $servicePath
+	            sudo echo "CapabilityBoundingSet=$serviceCapabilityBoundingSet" >> $servicePath
+	            sudo echo "AmbientCapabilities=$serviceAmbientCapabilities" >> $servicePath
+            ;;
+        esac
     # Reality NoNewPrivileges
     if [ $tunnelingMethod == reality ]; then
         sudo echo "NoNewPrivileges=true" >> $servicePath
@@ -310,8 +383,13 @@ createService() {
     # Hysteria 2 ExecReload
     if [ $tunnelingMethod == hysteria2 ]; then
 	    sudo echo "ExecReload=/bin/kill -HUP \$MAINPID" >> $servicePath
-        fi
-	sudo echo "Restart=on-failure" >> $servicePath
+        fi  
+    # Hysteria 2 & Reality Restart
+    case $tunnelingMethod in
+        'hysteria2' | 'reality')
+            sudo echo "Restart=on-failure" >> $servicePath
+            ;;
+        esac
     # Reality RestartPreventExitStatus and StandardOutput 
     if [ $tunnelingMethod == reality ]; then
         sudo echo "RestartPreventExitStatus=23" >> $servicePath
@@ -325,7 +403,12 @@ createService() {
     if [ $tunnelingMethod == reality ]; then
         sudo echo "LimitNPROC=100000" >> $servicePath
         fi
-	sudo echo "LimitNOFILE=$serviceLimitNOFILE" >> $servicePath
+    # Hysteria 2 & Reality LimitNOFILE
+    case $tunnelingMethod in
+        'hysteria2' | 'reality')
+	        sudo echo "LimitNOFILE=$serviceLimitNOFILE" >> $servicePath
+            ;;
+        esac
 	sudo echo "" >> $servicePath
 	sudo echo "[Install]" >> $servicePath
 	sudo echo "WantedBy=multi-user.target" >> $servicePath
@@ -340,19 +423,80 @@ switchUser() {
 	sshpass -p $newAccPassword ssh -o "StrictHostKeyChecking=no" $newAccUsername@127.0.0.1
     }
 
+# Checks whether the selected tunnel already exists on the machine or not.
+# TODO: If so, we have to ask for removal or updating.
+# TODO: CURRENTLY IT DOES NOTHING!!!
+checkIfTunnelAlreadyExists() {
+    # We check if the selected tunnel already exists or not.
+    case $tunnelingMethod in
+        reality)
+            if [ -f '/etc/systemd/system/xray.service' ]; then
+            xrayServiceAlreadyExists=1
+            fi
+        ;;
+    esac
+    }
+
+# Restarts the tunneling pipeline for a fresh start.
+reloadScript() {
+    # We clear the tunnelingMethod variable
+    unset tunnelingMethod
+    # We ask the user to select a tunneling method again.
+    askTunnelingMethod
+    # We check whether the selected tunneling method already exists or not.
+    checkIfTunnelAlreadyExists
+    # We start installing the tunnel.
+    installTunnel
+    }
+
+# Shows an error message, then calls the reloadScript function.
+hardwareNotSupported() {
+    echo "${RED}Error: ${RESET}This architecture is NOT Supported by $tunnelName"
+    echo "Try selecting another tunnel"
+    echo "the script will now return to tunnel selection menu in 5 seconds"
+    # We will pause the script for 5 seconds and then reload the script
+    sleep 5s
+    reloadScript
+    }
+
+# Checks whether the CPU architecture has VFP (Vector Floating Point accelerator) support or not.
+# Returns:
+#   "Present"
+#   "Absent"
+checkVfpSupport() {
+    # We get cpu features located at /proc/cpuinfo and look for 'vfp' in it.
+    # If the count is greater than 0, then we have VFP support, else we don't have.
+    if [ $(grep -c 'vfp' /proc/cpuinfo) -gt 0 ]; then
+        echo "Present"
+    else
+        echo "Absent"
+        fi
+    }
+
 # Gets the current machine's hardware architecture and translates it to appropriate string based on selected tunneling method.
-# If the tunnel does not supprt the current hardware architecture, an error message will be shown and the script will exit.
+# If the tunnel does not support the current hardware architecture, an error message will be shown and the script will exit.
 getHardwareArch() {
     # We check and save the hardware architecture of current machine.
 	local hwarch="$(uname -m)"
     # We translate it to appropriate string based on each tunneling method.
     # If the architecture is not supported by the selected tunneling method, we will show an error message and exit the script.
 	case $hwarch in
-        # x86 - 64 Bit
-	    x86_64)
+        # x86 - 32 Bit
+        'i386' | 'i686')
             case $tunnelingMethod in
                 hysteria2)
-                    # We check if cpu supprt AVX
+                    hwarch="386"
+                    ;;
+                xray)
+                    hwarch="32"
+                    ;;
+                esac
+            ;;
+        # x86 - 64 Bit
+	    'x86_64' | 'amd64')
+            case $tunnelingMethod in
+                hysteria2)
+                    # We check if cpu support AVX.
 	                avxsupport="$(lscpu | grep -o avx)"
 	                if [ -z "$avxsupport" ]; then 
 		                hwarch="amd64"
@@ -364,21 +508,57 @@ getHardwareArch() {
                 xray)
                     hwarch="64"
                     ;;
-                    esac
+                esac
 	        ;;
-        # x86 - 32 Bit
-        i386)
+        # Arm - 32 Bit - V5
+        'armv5tel')
             case $tunnelingMethod in
                 hysteria2)
-                    hwarch="386"
+                    # Hysteria does not support armv5tel, we will show an error and reload the script.
+                    hardwareNotSupported
                     ;;
                 xray)
-                    hwarch="32"
+                    hwarch="arm32-v5"
                     ;;
-                    esac
+                esac
+            ;;
+        # Arm - 32 Bit - V6
+        'armv6l')
+            case $tunnelingMethod in
+                # Hysteria does not support armv6l, we will show an error and reload the script.
+                hysteria2)
+                    hardwareNotSupported
+                    ;;
+                xray)
+                    # We check whether the cpu has Vector Floating Point (VFP) accelerator or not.
+                    # If cpu does not support it, we revert back to an older package, omitted from these instruction calls.
+                    if [ checkVfpSupport == "Present" ]; then
+                        hwarch="arm32-v6"
+                    else
+                        hwarch="arm32-v5"
+                        fi
+                    ;;
+                esac
+            ;;
+        # Arm - 32 Bit - V7
+	    'armv7' | 'armv7l')
+            case $tunnelingMethod in
+                hysteria2)
+                    hwarch="armv7"
+                    ;;
+                xray)
+                    # We check whether the cpu has Vector Floating Point (VFP) accelerator or not.
+                    # If cpu does not support it, we revert back to an older package, omitted from these instruction calls.
+                    if [ checkVfpSupport == "Present" ]; then
+                        hwarch="arm32-v7a"
+                    else
+                        hwarch="arm32-v5"
+                        fi
+                    ;;
+                esac
             ;;
         # Arm - 64 Bit - V8
-	    aarch64)
+	    'aarch64' | 'armv8')
             case $tunnelingMethod in
                 hysteria2)
                     hwarch="arm64"
@@ -388,56 +568,107 @@ getHardwareArch() {
                     ;;
                     esac
             ;;
-        # Arm - 32 Bit - V7
-	    armv7l)
+        # MIPS - 32 Bit
+        'mips')
             case $tunnelingMethod in
+                # Hysteria does not support mips, we will show an error and reload the script.
                 hysteria2)
-                    hwarch="armv7"
+                    hardwareNotSupported
                     ;;
                 xray)
-                    hwarch="arm32-v7a"
+                    hwarch="mips32"
                     ;;
-                    esac
+                esac
             ;;
-        # Arm - 32 Bit - V6
-        armv6l)
+        # MIPS - 32 Bit - Little Endian
+        'mipsle')
             case $tunnelingMethod in
-                # Hysteria does not support armv6l, we will show an error and exit the script
+                # Hysteria does not support mipsle, we will show an error and reload the script.
                 hysteria2)
-	                echo "This architecture is NOT Supported by Sing-Box. exiting ..."
-	                exit
+                    hardwareNotSupported
                     ;;
                 xray)
-                    hwarch="arm32-v6"
+                    hwarch="mips32le"
                     ;;
-                    esac
+                esac
+            ;;
+        # MIPS - 64 Bit
+        'mips64')
+            case $tunnelingMethod in
+                # Hysteria does not support mips64, we will show an error and reload the script.
+                hysteria2)
+                    hardwareNotSupported
+                    ;;
+                xray)
+                    # We check whether the architecture byte order is little endian or not.
+                    if [ $(lscpu | grep -c "Little Endian") -gt 0 ]; then
+                        hwarch="mips64le"
+                    else
+                        hwarch="mips64"
+                        fi
+                    ;;
+                esac
+            ;;
+        # MIPS - 64 Bit - Little Endian
+        'mips64le')
+            case $tunnelingMethod in
+                # Hysteria does not support mips64le, we will show an error and reload the script.
+                hysteria2)
+                    hardwareNotSupported
+                    ;;
+                xray)
+                    hwarch="mips64le"
+                    ;;
+                esac
             ;;
         # PowerPC - 64 Bit
-        ppc64)
+        'ppc64')
             case $tunnelingMethod in
-                # Hysteria does not support armv6l, we will show an error and exit the script
+                # Hysteria does not support ppc64, we will show an error and exit the script
                 hysteria2)
-	                echo "This architecture is NOT Supported by Sing-Box. exiting ..."
-	                exit
+                    hardwareNotSupported
                     ;;
                 xray)
                     hwarch="ppc64"
                     ;;
-                    esac
+                esac
+            ;;
+        # PowerPC - 64 Bit - Little Endian
+        'ppc64le')
+            case $tunnelingMethod in
+                # Hysteria does not support ppc64le, we will show an error and exit the script
+                hysteria2)
+                    hardwareNotSupported
+                    ;;
+                xray)
+                    hwarch="ppc64le"
+                    ;;
+                esac
+            ;;
+        # RISC V - 64 Bit
+        'riscv64')
+            case $tunnelingMethod in
+                # Hysteria does not support riscv64, we will show an error and exit the script
+                hysteria2)
+                    hardwareNotSupported
+                    ;;
+                xray)
+                    hwarch="riscv64"
+                    ;;
+                esac
             ;;
         # IBM System/390
         # Because there is no difference, we don't check anything here.
-        s390x)
+        's390x')
             hwarch="s390x"
             ;;
         # If nothing matched, either it's not implemented yet OR the tunnels don't support such architecture.
-        # We show an error message and exit the script.
+        # We show an error message and reload the script.
 	    *)
-	        echo "This architecture is NOT Supported by this script. exiting ..."
-	        exit
+            hardwareNotSupported
             ;;
 	    esac
-    # We echo back the tranlated hardware architecture.
+    # We echo back the translated hardware architecture.
     echo $hwarch
     }
 
@@ -447,7 +678,7 @@ getHardwareArch() {
 createSSLCertificateKeyPairs() {
     # We create certificate keys.
 	openssl ecparam -genkey -name prime256v1 -out ca.key
-	# We check wether user has provided custom common name for SSL certificate.
+	# We check whether user has provided custom common name for SSL certificate.
 	# If not, we will use default.
 	if [ ! -v sslcn ]; then
 		sslcn="google-analytics.com"
@@ -458,8 +689,17 @@ createSSLCertificateKeyPairs() {
 # Downloads the required files for selected tunnel and extracts them, then removes the downloaded package.
 # TODO: Rework the reality downloader to use reality as name not xray (this makes some confusion later on).
 downloadFiles() {
-    # Get current hardware architecture.
-    local hardwareArch=$(getHardwareArch)
+    # If selected tunnel is ShadowSocks, only one command is needed and other steps are not required.
+    if [ $tunnelingMethod == shadowsocks ]; then
+        # We check whether user has requested to install edge channel or not.
+	    # If so, we will use edge channel.
+        if [ -v ssUseEdgeChannel ]; then
+            snap install shadowsocks-libev --edge
+        else
+            snap install shadowsocks-libev
+        fi
+        return
+        fi
     # Hysteria 2
     local singBoxUrl="https://github.com/SagerNet/sing-box/releases/download/v$tempLatestPackageVersion/sing-box-$tempLatestPackageVersion-linux-$hardwareArch.tar.gz"
     local singBoxPackageName="sing-box-$tempLatestPackageVersion-linux-$hardwareArch.tar.gz"
@@ -518,13 +758,13 @@ configureSingBox() {
     # We restart the service and enable auto-start
     sudo systemctl daemon-reload && sudo systemctl enable hysteria2
 
-    # We check wether user has provided custom hysteria obfs password
+    # We check whether user has provided custom hysteria obfs password
 	# If not, we will generate a random password for salamander obfs
 	if [ ! -v h2ObfsPass ]; then
     	h2ObfsPass=$(generateRandom password)
         fi
 
-    # We check wether user has provided custom hysteria authentication password
+    # We check whether user has provided custom hysteria authentication password
     # If not, we will generate a random password for hysteria user
     if [ ! -v h2UserPass ]; then
         h2UserPass=$(generateRandom password)
@@ -2608,39 +2848,102 @@ configureSingBox() {
 EOL
 }
 
+writeXrayConfigFile() {
+    # We store the path of the 'config.json' file.
+    XRAY_CONFIG_FILE_PATH=/home/$tempNewAccUsername/xray/config.json
+    # We initialize our parameters.
+    # Access log path
+    if [ $DISABLE_XRAY_ACCESS_LOG == 1 ]; then
+        # The special value (none) disables access logs.
+        $XRAY_ACCESS_LOG_PATH='none'
+        fi
+    # Error log path
+    if [ $DISABLE_XRAY_ERROR_LOG == 1 ]; then
+        # The special value (none) disables error logs.
+        $XRAY_ERROR_LOG_PATH='none'
+        fi
+    # Log level
+    case $XRAY_LOG_LEVEL in
+        0)
+            # Do not record any content.
+            XRAY_LOG_LEVEL="none"
+            ;;
+        1)
+            # Output information used for debugging the program. Includes all "info" content.
+            XRAY_LOG_LEVEL="debug"
+            ;;
+        2)
+            # Runtime status information, etc., which does not affect normal use. Includes all "warning" content.
+            XRAY_LOG_LEVEL="info"
+            ;;
+        3)
+            # Information output when there are some problems that do not affect normal operation but may affect user experience. Includes all "error" content.
+            XRAY_LOG_LEVEL="warning"
+            ;;
+        4)
+            # Xray encountered a problem that cannot be run normally and needs to be resolved immediately.
+            XRAY_LOG_LEVEL="error"
+            ;;
+        *)
+            # Invalid input from user, revert to default value (warning).
+            XRAY_LOG_LEVEL="warning"
+            ;;
+            esac
+
+    # We start writing to config file with ( > ) to replace existing config parameters if present.
+    sudo echo "{" > $XRAY_CONFIG_FILE_PATH
+    # log section
+    cat >> $XRAY_CONFIG_FILE_PATH << 'END_OF_LOG_SECTION'
+        "log":{
+            "access":   "$XRAY_ACCESS_LOG_PATH",
+            "error":    "$XRAY_ERROR_LOG_PATH",
+            "loglevel": "$XRAY_LOG_LEVEL",
+            "dnsLog":   $XRAY_LOG_DNS
+            },
+END_OF_LOG_SECTION
+    # 
+    
+    
+    # We finish the file by closing the curly brackets
+    sudo echo "}" >> $XRAY_CONFIG_FILE_PATH
+    }
+
 configureXray() {
     echo "========================================================================="
     echo "|                         Configuring xray                              |"
-    echo "========================================================================="
-    
-    # We generate a random uuid
-    randomUUID=$(./xray uuid -i $(generateRandom password))
-
-    # We generate public and private keys and temporarily save them
-    local temp=$(./xray x25519)
-
-    # We extract private key
-    local temp2="${temp#Private key: }"
-    xrayPrivateKey=`echo "${temp2}" | head -1`
-
-    # We extract the public key
-    local temp3="${temp2#$privatekey}"
-    xrayPublicKey="${temp3#*Public key: }"
-
-    # We generate a short id
-    shortId=$(openssl rand -hex 8)
-
-    # We restart the service and enable auto-start
+    echo "========================================================================="  
+    # We check whether user has provided custom UUID or not.
+	# If not, we will generate a random UUID.
+	if [ ! -v realityUUID ]; then
+        realityUUID=$(./xray uuid -i $(generateRandom password))
+        fi
+    # We check whether user has provided custom public & private key or not.
+    # If one or both of them are missing, generate a new public and private key.
+    if [ ! -v $realityPrivateKey || ! -v $realityPublicKey ]; then
+        # We generate public and private keys and temporarily save them.
+        local temp=$(./xray x25519)
+        # We extract private key
+        local temp2="${temp#Private key: }"
+        realityPrivateKey=`echo "${temp2}" | head -1`
+        # We extract the public key
+        local temp3="${temp2#$privatekey}"
+        realityPublicKey="${temp3#*Public key: }"
+        fi
+    # We check whether user has provided custom short ID or not.
+    # If not, we will generate a random short ID.
+    if [ ! -v $realityShortID ]; then
+        # We generate a short id.
+        realityShortID=$(openssl rand -hex 8)
+        fi
+    # We restart the service and enable auto-start.
     sudo systemctl daemon-reload && sudo systemctl enable xray
+    # Write configuration parameters into config.json file
+    writeXrayConfigFile
 
-    # We store the path of the 'config.json' file
-    local configfile=/home/$tempNewAccUsername/xray/config.json
 
-    cat > $configfile << EOL
+    cat > $XRAY_CONFIG_FILE_PATH << EOL
     {
-       "log":{
-          "loglevel":"warning"
-       },
+
        "policy":{
           "levels":{
              "0":{
@@ -2657,7 +2960,7 @@ configureXray() {
              "settings":{
                 "clients":[
                    {
-                      "id":"$randomUUID",
+                      "id":"$realityUUID",
                       "flow":"xtls-rprx-vision"
                    }
                 ],
@@ -2673,12 +2976,12 @@ configureXray() {
                    "serverNames":[
                       "www.google-analytics.com"
                    ],
-                   "privateKey":"$xrayPrivateKey",
+                   "privateKey":"$realityPrivateKey",
                    "minClientVer":"1.8.0",
                    "maxClientVer":"",
                    "maxTimeDiff":0,
                    "shortIds":[
-                      "$shortId"
+                      "$realityShortID"
                    ]
                 }
              },
@@ -4666,6 +4969,32 @@ configureXray() {
 EOL
 }
 
+# Creates a config file for ShadowSocks-libev
+configureShadowsocks() {
+    # We create some local variables to hold tunnel specific data.
+    local configDirectoryPath="/var/snap/shadowsocks-libev/common/etc/shadowsocks-libev"
+    local configFilePath="$configDirectoryPath/config.json"
+    echo "========================================================================="
+    echo "|                     Configuring ShadowSocks                           |"
+    echo "========================================================================="
+    # We will create the directory path for config file.
+    sudo mkdir -p $configDirectoryPath
+    # We create an empty config file.
+    sudo touch $configFilePath
+    # We generate a password for ShadowSocks authentication
+    ssPassword=$(generateRandom password)
+    # Configure ShadowSocks config file
+    sudo echo "{" > $configFilePath
+    sudo echo "    \"server\":[\"[::0]\", \"0.0.0.0\"]," >> $configFilePath
+    sudo echo "    \"mode\":\"tcp_and_udp\"," >> $configFilePath
+    sudo echo "    \"server_port\":$tunnelPort," >> $configFilePath
+    sudo echo "    \"password\":\"$ssPassword\"," >> $configFilePath
+    sudo echo "    \"timeout\":600," >> $configFilePath
+    sudo echo "    \"method\":\"chacha20-ietf-poly1305\"," >> $configFilePath
+    sudo echo "    \"nameserver\":\"1.1.1.1\"" >> $configFilePath
+    sudo echo "}" >> $configFilePath
+    }
+
 # Starts the tunnel service based on the specified tunneling method.
 startService() {
     # We determine the selected tunneling method and set service name accordingly.
@@ -4676,10 +5005,16 @@ startService() {
         reality)
             local serviceName="xray"
             ;;
+        shadowsocks)
+            local serviceName="shadowsocks-libev-server@config"
         esac
     echo "========================================================================="
     echo "|                         Starting Service                              |"
     echo "========================================================================="
+    # If the selected tunnel is ShadowSocks, We must manually enable the service to start on boot.
+    if [ $tunnelingMethod == shadowsocks ]; then
+        sudo systemctl enable $serviceName
+        fi
     # We now start the tunnel service.
     sudo systemctl start $serviceName && sudo systemctl status $serviceName
     }
@@ -4692,7 +5027,7 @@ showConnectionInformation() {
     echo "========================================================================="
     # We get server IP.
     serverIp=$(hostname -I | awk '{ print $1}')
-    # We check wether user has provided custom server name or not.
+    # We check whether user has provided custom server name or not.
 	# If not, we will use hostname as server name.
     if [ ! -v serverName ]; then
         serverName=$('hostname')
@@ -4704,7 +5039,7 @@ showConnectionInformation() {
         hysteria2)
             echo "NAME : $serverName"
             ;;
-        reality)
+        'reality' | 'shadowsocks')
             echo "REMARKS : $serverName"
             ;;
             esac
@@ -4713,13 +5048,12 @@ showConnectionInformation() {
     # We determine the selected tunneling method and set fields accordingly.
     case $tunnelingMethod in
         hysteria2)
-            echo "OBFUSCATION PASSWORD : $h2ObfsPass"
-            echo "AUTHENTICATION PASSWORD : $h2UserPass"
-            echo "ALLOW INSECURE : TRUE"
+            echo "OBFUSCATION PASSWORD: $h2ObfsPass"
+            echo "AUTHENTICATION PASSWORD: $h2UserPass"
+            echo "ALLOW INSECURE: TRUE"
             ;;
         reality)
-            echo "REMARKS : $serverName"
-            echo "ID: $randomUUID"
+            echo "ID: $realityUUID"
             echo "FLOW: xtls-rprx-vision"
             echo "ENCRYPTION: none"
             echo "NETWORK: TCP"
@@ -4727,21 +5061,25 @@ showConnectionInformation() {
             echo "TLS: reality"
             echo "SNI: www.google-analytics.com"
             echo "FINGERPRINT: randomized"
-            echo "PUBLIC KEY: $xrayPublicKey"
-            echo "SHORT ID: $shortId"
+            echo "PUBLIC KEY: $realityPublicKey"
+            echo "SHORT ID: $realityShortID"
+            ;;
+        shadowsocks)
+            echo "PASSWORD: $ssPassword"
+            echo "SECURITY: CHACHA20-IETF-POLY1305"
             ;;
             esac
     echo "=========="
     # Reality Private Key
     if [ $tunnelingMethod == reality ]; then
-        echo "PRIVATE KEY : $xrayPrivateKey"
+        echo "PRIVATE KEY : $realityPrivateKey"
         fi
     echo "LOCAL USERNAME : $tempNewAccUsername"
     echo "LOCAL PASSWORD : $tempNewAccPassword"
     echo 
     echo "Write down the LOCAL USERNAME & LOCAL PASSWORD"
     echo "you may need it for updating later"
-    echo "Usage of country-based routing is highly advised!"
+    echo "${BLUE}Usage of country-based routing is highly advised!${RESET}"
     }
 
 # Shows the QR Code for easier access to the tunnel.
@@ -4756,14 +5094,18 @@ showQrCode() {
             local serverConfig="hy2://$h2UserPass@$serverIp:$tunnelPort/?insecure=1&obfs=salamander&obfs-password=$h2ObfsPass#$serverName"
             ;;
         reality)
-            local serverConfig="vless://$randomUUID@$serverIp:$tunnelPort?security=reality&encryption=none&pbk=$xrayPublicKey&headerType=none&fp=randomized&type=tcp&flow=xtls-rprx-vision&sni=www.google-analytics.com&sid=$shortId#$serverName"
+            local serverConfig="vless://$realityUUID@$serverIp:$tunnelPort?security=reality&encryption=none&pbk=$realityPublicKey&headerType=none&fp=randomized&type=tcp&flow=xtls-rprx-vision&sni=www.google-analytics.com&sid=$realityShortID#$serverName"
+            ;;
+        shadowsocks)
+            local encodedSegment=$(openssl base64 <<< "chacha20-ietf-poly1305:$ssPassword")
+            local serverConfig="ss://$encodedSegment@$serverIp:$tunnelPort#$serverName"
             ;;
         esac  
-    # We output a qrcode to ease connection.
+    # We output a Qr Code to ease connection.
     qrencode -t ansiutf8 $serverConfig
     }
 
-# Checks the repository of the selected tunnel and echos back the latest release version of it.
+# Checks the repository of the selected tunnel and echoes back the latest release version of it.
 checkLatestVersion() {
     case $tunnelingMethod in
         hysteria2)
@@ -4777,34 +5119,48 @@ checkLatestVersion() {
     echo "$(curl --silent $url | grep -Po "(?<=\"tag_name\": \").*(?=\")"  | sed 's/^.//' )"
     }
 
+finishScript() {
+    echo "The script has finished!"
+    read -n 1 -s -r -p "Press any key to exit"
+    exit
+    }
+
 # Main installation pipeline for tunnels.
 installTunnel() {
     # We determine the selected tunneling method and set tunnel variables accordingly.
     case $tunnelingMethod in
         hysteria2)
-            local tunnelName="Hysteria 2"
+            tunnelName="Hysteria 2"
             ;;
         reality)
-            local tunnelName="Reality"
+            tunnelName="Reality"
             ;;
         shadowsocks)
-            local tunnelName="ShadowSocks"
+            tunnelName="ShadowSocks"
             ;;
         esac
 	echo "========================================================================="
 	echo "|                        Installing $tunnelName                          |"
 	echo "========================================================================="
+    # We check whether the selected tunneling method is available on the current machine architecture or not.
+    # If not, we will show and error and exit the script.
+    hardwareArch=$(getHardwareArch)
+    # We check whether user requested to disable package updating or not.
+    # If not, we will update packages.
+    if [ ! -v disablePackageUpdating ]; then
+	    installPackages
+        fi
     # If the selected tunnel is Hysteria 2 or Reality, we check and save the latest package version number.
-    # ShadowSocks uses (snap) to install and does not need to check a url.
+    # ShadowSocks uses (snap) to install and does not need to check a URL.
     case $tunnelingMethod in
-        hysteria2 || reality)
+        'hysteria2' | 'reality')
             latestPackageVersion=$(checkLatestVersion)
-            # We check wether we were able to get the latest package version.
+            # We check whether we were able to get the latest package version.
             # If not, we will exit the script to prevent messing up something.
             if [ -z $latestPackageVersion ]; then
                 echo "There is a problem while trying to get latest version of $tunnelName!"
                 echo "either:"
-                echo "1. You are offline"
+                echo "1. You are off-line"
                 echo "2. Access to github is blocked"
                 echo "3. repository is unavailable for some reason"
                 echo 
@@ -4813,7 +5169,7 @@ installTunnel() {
                 fi
             ;;
         esac
-    # We check wether user has disabled server settings optimization or not.
+    # We check whether user has disabled server settings optimization or not.
 	# If not, we will optimize server settings.
 	if [ ! -v disableServerOptimization ]; then
 		optimizeServerSettings
@@ -4844,19 +5200,24 @@ installTunnel() {
         reality)
             configureXray
             ;;
+        shadowsocks)
+            configureShadowsocks
+            ;;
         esac
     # We start the tunnel service.
     startService
-    # We check wether user has disabled showing connection information or not.
+    # We check whether user has disabled showing connection information or not.
 	# If not, we will show connection information.
     if [ ! -v disableConnectionInformation ]; then
         showConnectionInformation
         fi
-    # We check wether user has disabled showing QR Code or not.
+    # We check whether user has disabled showing QR Code or not.
 	# If not, we will show QR Code.
     if [ ! -v disableQrCode ]; then
         showQrCode
         fi
+    # At last we will show a message and exit the script.
+    finishScript
     }
 
 # <<< SCRIPT STARTS HERE >>>
@@ -4864,7 +5225,7 @@ installTunnel() {
 # We iterate through all provided arguments.
 while [ ! -z "$1" ]; do
 	case "$1" in
-		# Tunneling method
+		# Tunneling method.
 		-tm)
 			shift
 			# Hysteria 2
@@ -4896,59 +5257,102 @@ while [ ! -z "$1" ]; do
         -dqrcode)
             disableQrCode=1
             ;;
-        # Disable showing the startup message
+        # Disable showing the startup message.
         -dstartmsg)
             disableStartupMessage=1
             ;;
-		# Set custom username for new account (default: random)
+		# Set custom username for new account (default: random).
 		-setusername)
 			newAccUsername=$2
 			;;
-		# Set custom password for new account (default: random)
+		# Set custom password for new account (default: random).
 		-setuserpass)
 			newAccPassword=$2
 			;;
-        # Set custom port for protcols
+        # Set custom port for protocols.
         -settunnelport)
             tunnelPort=$2
             ;;
-        # Set custom server name
+        # Set custom server name.
         -setservername)
             serverName=$2
             ;;
-		# Set custom SSL certificate common name for hysteria 2 (CN) (default: google-analytics.com)
+        # Hysteria 2
+		# Set custom SSL certificate common name for hysteria 2 (CN) (default: google-analytics.com).
 		-seth2sslcn)
 			h2sslcn=$2
 			;;
-		# Set custom hysteria 2 obfs password (default: random)
+		# Set custom hysteria 2 obfs password (default: random).
         -seth2obfspass)
             h2ObfsPass=$2
             ;;
-        # Set custom password for hysteria 2 protocol authentication password
+        # Set custom password for hysteria 2 protocol authentication password.
         -seth2userpass)
             h2UserPass=$2
+            ;;
+        # Reality
+        # Set custom UUID.
+        -setxrUUID)
+            realityUUID=$2
+            ;;
+        # Set custom private key.
+        -setxrprivkey)
+            realityPrivateKey=$2
+            ;;
+        # Set custom public key.
+        -setxrpubkey)
+            realityPublicKey=$2
+            ;;
+        # Set custom short ID.
+        -setxrshortid)
+            realityShortID=$2
+            ;;
+        # Set custom path for access log file.
+        -setxracslgpath)
+            XRAY_ACCESS_LOG_PATH=$2
+            ;;
+        # Disables writing access logs.
+        -dxracslg)
+            DISABLE_XRAY_ACCESS_LOG=1
+            ;;
+        # Set custom path for error log file.
+        -setxrerrlgpath)
+            XRAY_ERROR_LOG_PATH=$2
+            ;;
+        # Disables writing error logs.
+        -dxrerrlg)
+            DISABLE_XRAY_ERROR_LOG=1
+            ;;
+        # Set log level, acceptable range 0 - 4.
+        -xrlogl)
+            XRAY_LOG_LEVEL=$2
+            ;;        
+        # Enable logging DNS queries
+        -xrlogdns)
+            XRAY_LOG_DNS=true
+            ;;
+        # ShadowSocks
+        # Forces snap to use edge channel for shadowsocks-libev package.
+        -ssedge)
+            ssUseEdgeChannel=1
             ;;
 	    esac
     shift
     done
 
-# We check wether user requested to disable startup message or not.
+# We check whether user requested to disable startup message or not.
 # If not, we will show the startup message.
 if [ ! -v disableStartupMessage ]; then
     showStartupMessage
     fi
 
-# We check wether the tunneling method is supplied at execution or not
-# If not, we will ask for it
+# We check whether the tunneling method is supplied at execution or not.
+# If not, we will ask for it.
 if [ ! -v tunnelingMethod ]; then
 	askTunnelingMethod
     fi
 
-# We check wether user requested to disable package updating or not
-# If not, we will update packages
-if [ ! -v disablePackageUpdating ]; then
-	installPackages
-    fi
+checkIfTunnelAlreadyExists
 
-# We call the installation pipeline
+# We call the installation pipeline.
 installTunnel
